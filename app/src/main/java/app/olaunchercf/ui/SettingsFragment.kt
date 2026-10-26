@@ -1,8 +1,10 @@
 package app.olaunchercf.ui
 
 import SettingsTheme
+import android.Manifest
 import android.app.Activity
 import android.app.admin.DevicePolicyManager
+import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -14,6 +16,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ScrollView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -67,6 +70,20 @@ class SettingsFragment : Fragment() {
 
     private val offset = 5
 
+    private var mawaqitInstalled = false
+    private val showNextPrayer = mutableStateOf(false)
+    private val bindMawaqitWidget = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode != Activity.RESULT_OK) disableNextPrayer()
+    }
+
+    private val showTodayEvents = mutableStateOf(false)
+    private val requestCalendarPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) {
+            showTodayEvents.value = false
+            prefs.showTodayEvents = false
+        }
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -74,6 +91,10 @@ class SettingsFragment : Fragment() {
     ): View {
         _binding = FragmentSettingsBinding.inflate(inflater, container, false)
         prefs = Prefs(requireContext())
+        mawaqitInstalled = MawaqitWidget.isInstalled(requireContext())
+        // off if the widget permission was refused, or the settings come from a backup
+        showNextPrayer.value = prefs.showNextPrayer && MawaqitWidget(requireContext()).isBound(prefs.mawaqitWidgetId)
+        showTodayEvents.value = prefs.showTodayEvents && hasCalendarPermission(requireContext())
         return binding.root
     }
 
@@ -216,6 +237,44 @@ class SettingsFragment : Fragment() {
                             onChange = onChange,
                             state = remember { mutableStateOf(prefs.showDate) }
                         ) { toggleShowDate() }
+                    },
+                    { _, onChange ->
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            SettingsToggle(
+                                title = stringResource(R.string.show_hijri_date),
+                                onChange = onChange,
+                                state = remember { mutableStateOf(prefs.showHijriDate) }
+                            ) { prefs.showHijriDate = !prefs.showHijriDate }
+                        }
+                    },
+                    { open, onChange ->
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            SettingsNumberItem(
+                                title = stringResource(R.string.hijri_date_adjustment),
+                                open = open,
+                                onChange = onChange,
+                                currentSelection = remember { mutableStateOf(prefs.hijriDateAdjustment) },
+                                min = -2,
+                                max = 2,
+                                onSelect = { j -> prefs.hijriDateAdjustment = j }
+                            )
+                        }
+                    },
+                    { _, onChange ->
+                        if (mawaqitInstalled) {
+                            SettingsToggle(
+                                title = stringResource(R.string.show_next_prayer),
+                                onChange = onChange,
+                                state = showNextPrayer
+                            ) { toggleShowNextPrayer() }
+                        }
+                    },
+                    { _, onChange ->
+                        SettingsToggle(
+                            title = stringResource(R.string.show_today_events),
+                            onChange = onChange,
+                            state = showTodayEvents
+                        ) { toggleShowTodayEvents() }
                     },
                     { _, onChange ->
                         SettingsToggle(
@@ -421,6 +480,45 @@ class SettingsFragment : Fragment() {
     private fun toggleShowDate() {
         prefs.showDate = !prefs.showDate
         viewModel.setShowDate(prefs.showDate)
+    }
+
+    // the toggle has already flipped showTodayEvents
+    private fun toggleShowTodayEvents() {
+        prefs.showTodayEvents = showTodayEvents.value
+        if (showTodayEvents.value && !hasCalendarPermission(requireContext())) {
+            requestCalendarPermission.launch(Manifest.permission.READ_CALENDAR)
+        }
+    }
+
+    // the toggle has already flipped showNextPrayer
+    private fun toggleShowNextPrayer() {
+        if (showNextPrayer.value) enableNextPrayer() else disableNextPrayer()
+    }
+
+    private fun enableNextPrayer() {
+        prefs.showNextPrayer = true
+        val mawaqit = MawaqitWidget(requireContext())
+        val oldWidgetId = prefs.mawaqitWidgetId
+        if (mawaqit.isBound(oldWidgetId)) return
+        if (oldWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) mawaqit.unbind(oldWidgetId)
+
+        val (widgetId, permissionIntent) = mawaqit.bind()
+        prefs.mawaqitWidgetId = widgetId
+        if (permissionIntent != null) {
+            // without this flag MainActivity takes the dialog for the user leaving and closes the settings
+            permissionIntent.addFlags(Intent.FLAG_ACTIVITY_NO_USER_ACTION)
+            bindMawaqitWidget.launch(permissionIntent)
+        }
+    }
+
+    private fun disableNextPrayer() {
+        showNextPrayer.value = false
+        prefs.showNextPrayer = false
+        val widgetId = prefs.mawaqitWidgetId
+        if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+            MawaqitWidget(requireContext()).unbind(widgetId)
+            prefs.mawaqitWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
+        }
     }
 
     private fun toggleShowTime() {

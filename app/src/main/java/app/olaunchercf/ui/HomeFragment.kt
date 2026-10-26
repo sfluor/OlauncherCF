@@ -2,18 +2,33 @@ package app.olaunchercf.ui
 
 import android.annotation.SuppressLint
 import android.app.admin.DevicePolicyManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.res.ColorStateList
+import android.database.ContentObserver
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Vibrator
+import android.provider.CalendarContract
+import android.text.TextUtils
+import android.text.format.DateFormat
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TableRow
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.core.os.bundleOf
 import androidx.core.view.children
 import androidx.core.view.size
+import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
@@ -21,6 +36,7 @@ import androidx.navigation.fragment.findNavController
 import app.olaunchercf.MainViewModel
 import app.olaunchercf.R
 import app.olaunchercf.data.AppModel
+import app.olaunchercf.data.Constants
 import app.olaunchercf.data.Constants.Action
 import app.olaunchercf.data.Constants.AppDrawerFlag
 import app.olaunchercf.data.Prefs
@@ -28,8 +44,13 @@ import app.olaunchercf.databinding.FragmentHomeBinding
 import app.olaunchercf.helper.*
 import app.olaunchercf.listener.OnSwipeTouchListener
 import app.olaunchercf.listener.ViewSwipeTouchListener
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.Date
 
+
+private const val MAX_EVENTS = 5
 
 class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener {
 
@@ -37,6 +58,24 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
     private lateinit var viewModel: MainViewModel
     private lateinit var deviceManager: DevicePolicyManager
     private lateinit var vibrator: Vibrator
+    private lateinit var mawaqit: MawaqitWidget
+    private lateinit var islamicCornerParams: FrameLayout.LayoutParams
+    private lateinit var hijriDateColors: ColorStateList
+
+    private var timeReceiverRegistered = false
+    private val timeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            updateHijriDate()
+            updateTodayEvents()
+        }
+    }
+
+    private var calendarObserverRegistered = false
+    private val calendarObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) {
+            updateTodayEvents()
+        }
+    }
 
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
@@ -65,6 +104,11 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
 
         deviceManager = context?.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         vibrator = context?.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        mawaqit = MawaqitWidget(requireContext())
+        islamicCornerParams = binding.islamicLayout.layoutParams as FrameLayout.LayoutParams
+        hijriDateColors = binding.hijriDate.textColors
+        // the Arabic clock copies the clock, so it keeps its 12/24-hour format
+        binding.clock.doAfterTextChanged { binding.arabicClock.text = toArabicDigits(it ?: "") }
 
         initObservers()
 
@@ -78,11 +122,46 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
 
         binding.clock.textSize = prefs.textSize * 2.5f
         binding.date.textSize = prefs.textSize.toFloat()
+        // Arabic script looks smaller than Latin at the same size
+        binding.arabicClock.textSize = prefs.textSize * 2.5f
+        binding.hijriDate.textSize = prefs.textSize * 1.3f
+        binding.nextPrayer.textSize = prefs.textSize * 1.3f
 
+        updateHijriDate()
+        if (prefs.showHijriDate || prefs.showTodayEvents) {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_TIME_TICK)
+                addAction(Intent.ACTION_TIME_CHANGED)
+                addAction(Intent.ACTION_TIMEZONE_CHANGED)
+            }
+            requireContext().registerReceiver(timeReceiver, filter)
+            timeReceiverRegistered = true
+        }
+        startNextPrayer()
+    }
+
+    override fun onStop() {
+        if (timeReceiverRegistered) {
+            requireContext().unregisterReceiver(timeReceiver)
+            timeReceiverRegistered = false
+        }
+        if (calendarObserverRegistered) {
+            requireContext().contentResolver.unregisterContentObserver(calendarObserver)
+            calendarObserverRegistered = false
+        }
+        mawaqit.stopListening()
+        super.onStop()
     }
 
     override fun onResume() {
         super.onResume()
+
+        // here rather than in onStart, to catch the calendar permission granted from the dialog
+        if (prefs.showTodayEvents && hasCalendarPermission(requireContext()) && !calendarObserverRegistered) {
+            requireContext().contentResolver.registerContentObserver(CalendarContract.CONTENT_URI, true, calendarObserver)
+            calendarObserverRegistered = true
+        }
+        updateTodayEvents()
 
         // only show "set as default"-button if tips are GONE
         if (binding.firstRunTips.visibility == View.GONE) {
@@ -141,6 +220,7 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
         with(viewModel) {
             clockAlignment.observe(viewLifecycleOwner) { gravity ->
                 binding.dateTimeLayout.gravity = gravity.value()
+                placeIslamicLayout(gravity)
             }
             homeAppsAlignment.observe(viewLifecycleOwner) { (gravity, onBottom) ->
                 val horizontalAlignment = if (onBottom) Gravity.BOTTOM else Gravity.CENTER_VERTICAL
@@ -149,6 +229,7 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
                 binding.homeAppsLayout.children.forEach { view ->
                     (view as TextView).gravity = gravity.value()
                 }
+                placeEventsLayout(gravity, onBottom)
             }
             homeAppsCount.observe(viewLifecycleOwner) {
                 updateAppCount(it)
@@ -159,6 +240,126 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
             showDate.observe(viewLifecycleOwner) {
                 binding.date.visibility = if (it) View.VISIBLE else View.GONE
             }
+        }
+    }
+
+    // mirrors the clock: top-right corner when the clock is on the left, top-left when it is
+    // on the right, under the date when it is centered. Left/right are absolute, like the clock's.
+    @SuppressLint("RtlHardcoded")
+    private fun placeIslamicLayout(gravity: Constants.Gravity) {
+        val layout = binding.islamicLayout
+        val corner = when (gravity) {
+            Constants.Gravity.Left -> Gravity.RIGHT
+            Constants.Gravity.Right -> Gravity.LEFT
+            Constants.Gravity.Center -> null
+        }
+        val parent: ViewGroup = if (corner != null) binding.mainLayout else binding.dateTimeLayout
+        if (layout.parent !== parent) {
+            (layout.parent as ViewGroup).removeView(layout)
+            if (corner != null) {
+                parent.addView(layout, parent.indexOfChild(binding.dateTimeLayout) + 1, islamicCornerParams)
+            } else {
+                parent.addView(layout, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            }
+        }
+        if (corner != null) {
+            islamicCornerParams.gravity = Gravity.TOP or corner
+            layout.layoutParams = islamicCornerParams
+        }
+        layout.gravity = corner ?: gravity.value()
+    }
+
+    private fun updateHijriDate() {
+        if (_binding == null) return
+        if (prefs.showHijriDate && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val hijri = hijriDate(prefs.hijriDateAdjustment)
+            if (binding.hijriDate.text.toString() != hijri.text) binding.hijriDate.text = hijri.text
+            if (isAroundWhiteDays(hijri.day)) {
+                binding.hijriDate.setTextColor(ContextCompat.getColor(binding.hijriDate.context, R.color.hijriWhiteDays))
+            } else {
+                binding.hijriDate.setTextColor(hijriDateColors)
+            }
+            binding.hijriDate.visibility = View.VISIBLE
+            binding.arabicClock.visibility = if (prefs.showTime) View.VISIBLE else View.GONE
+        } else {
+            binding.hijriDate.visibility = View.GONE
+            binding.arabicClock.visibility = View.GONE
+        }
+    }
+
+    // bottom-right corner, or bottom-left when the home apps are at the bottom right
+    @SuppressLint("RtlHardcoded")
+    private fun placeEventsLayout(appsGravity: Constants.Gravity, appsOnBottom: Boolean) {
+        val params = binding.eventsLayout.layoutParams as FrameLayout.LayoutParams
+        val side = if (appsOnBottom && appsGravity == Constants.Gravity.Right) Gravity.LEFT else Gravity.RIGHT
+        params.gravity = Gravity.BOTTOM or side
+        binding.eventsLayout.layoutParams = params
+    }
+
+    private fun updateTodayEvents() {
+        if (_binding == null) return
+        val context = requireContext().applicationContext
+        if (!prefs.showTodayEvents || !hasCalendarPermission(context)) {
+            binding.eventsLayout.visibility = View.GONE
+            return
+        }
+        val timeFormat = DateFormat.getTimeFormat(context)
+        viewLifecycleOwner.lifecycleScope.launch {
+            val now = System.currentTimeMillis()
+            val events = withContext(Dispatchers.IO) { queryTodayEvents(context, now) }
+            showTodayEvents(todayEvents(events, startOfDay(now), now, MAX_EVENTS) { timeFormat.format(Date(it)) }, now)
+        }
+    }
+
+    private fun showTodayEvents(today: TodayEvents, now: Long) {
+        val table = _binding?.eventsLayout ?: return
+        table.removeAllViews()
+        if (today.rows.isEmpty()) {
+            table.visibility = View.GONE
+            return
+        }
+        for (row in today.rows) {
+            val tableRow = eventRow(row.time ?: getString(R.string.all_day), row.title.ifBlank { getString(R.string.no_title) })
+            tableRow.alpha = if (row.finished) 0.5f else 1f
+            tableRow.setOnClickListener { openCalendarEvent(it.context, row.event) }
+            table.addView(tableRow)
+        }
+        if (today.more > 0) {
+            val tableRow = eventRow("", getString(R.string.events_more, today.more))
+            tableRow.setOnClickListener { openCalendarDay(it.context, now) }
+            table.addView(tableRow)
+        }
+        table.visibility = View.VISIBLE
+    }
+
+    private fun eventRow(time: String, title: String): TableRow {
+        val context = requireContext()
+        val size = prefs.textSize.toFloat()
+        val timeView = TextView(context, null, 0, R.style.TextDefault).apply {
+            textSize = size
+            text = time
+        }
+        val titleView = TextView(context, null, 0, R.style.TextDefault).apply {
+            textSize = size
+            text = title
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            maxWidth = resources.displayMetrics.widthPixels / 2
+            setPaddingRelative(dp2px(resources, 12), 0, 0, 0)
+        }
+        return TableRow(context).apply {
+            addView(timeView)
+            addView(titleView)
+        }
+    }
+
+    private fun startNextPrayer() {
+        binding.nextPrayer.visibility = View.GONE
+        if (!prefs.showNextPrayer) return
+        mawaqit.startListening(prefs.mawaqitWidgetId) { nextPrayer ->
+            val view = _binding?.nextPrayer ?: return@startListening
+            view.text = nextPrayer
+            view.visibility = if (nextPrayer == null) View.GONE else View.VISIBLE
         }
     }
 
