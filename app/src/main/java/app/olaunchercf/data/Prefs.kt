@@ -1,5 +1,6 @@
 package app.olaunchercf.data
 
+import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.UserHandle
@@ -24,6 +25,10 @@ private const val DRAWER_ALIGNMENT = "DRAWER_ALIGNMENT"
 private const val TIME_ALIGNMENT = "TIME_ALIGNMENT"
 private const val STATUS_BAR = "STATUS_BAR"
 private const val SHOW_DATE = "SHOW_DATE"
+private const val SHOW_HIJRI_DATE = "SHOW_HIJRI_DATE"
+private const val HIJRI_DATE_ADJUSTMENT = "HIJRI_DATE_ADJUSTMENT"
+private const val SHOW_NEXT_PRAYER = "SHOW_NEXT_PRAYER"
+private const val MAWAQIT_WIDGET_ID = "MAWAQIT_WIDGET_ID"
 private const val HOME_LOCKED = "HOME_LOCKED"
 private const val SHOW_TIME = "SHOW_TIME"
 private const val SWIPE_DOWN_ACTION = "SWIPE_DOWN_ACTION"
@@ -171,6 +176,22 @@ class Prefs(val context: Context) {
     var showDate: Boolean
         get() = prefs.getBoolean(SHOW_DATE, true)
         set(value) = prefs.edit().putBoolean(SHOW_DATE, value).apply()
+
+    var showHijriDate: Boolean
+        get() = prefs.getBoolean(SHOW_HIJRI_DATE, false)
+        set(value) = prefs.edit().putBoolean(SHOW_HIJRI_DATE, value).apply()
+
+    var hijriDateAdjustment: Int
+        get() = prefs.getInt(HIJRI_DATE_ADJUSTMENT, 0)
+        set(value) = prefs.edit().putInt(HIJRI_DATE_ADJUSTMENT, value).apply()
+
+    var showNextPrayer: Boolean
+        get() = prefs.getBoolean(SHOW_NEXT_PRAYER, false)
+        set(value) = prefs.edit().putBoolean(SHOW_NEXT_PRAYER, value).apply()
+
+    var mawaqitWidgetId: Int
+        get() = prefs.getInt(MAWAQIT_WIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
+        set(value) = prefs.edit().putInt(MAWAQIT_WIDGET_ID, value).apply()
 
     var homeLocked: Boolean
         get() = prefs.getBoolean(HOME_LOCKED, false)

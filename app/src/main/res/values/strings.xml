@@ -53,6 +53,9 @@
     <string name="rename">Rename</string>
     <string name="show_time">Show time</string>
     <string name="show_date">Show date</string>
+    <string name="show_hijri_date">Show Arabic time and Hijri date</string>
+    <string name="hijri_date_adjustment">Hijri date adjustment (days)</string>
+    <string name="show_next_prayer">Show next prayer (Mawaqit)</string>
     <string name="lock_home_apps">Lock Apps</string>
     <string name="extend_home_apps_area">Extend clickable area on home apps</string>
     <string name="appearance">Appearance</string>

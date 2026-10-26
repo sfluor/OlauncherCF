@@ -2,7 +2,10 @@ package app.olaunchercf.ui
 
 import android.annotation.SuppressLint
 import android.app.admin.DevicePolicyManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.os.Vibrator
@@ -10,10 +13,13 @@ import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.os.bundleOf
 import androidx.core.view.children
 import androidx.core.view.size
+import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
@@ -21,6 +27,7 @@ import androidx.navigation.fragment.findNavController
 import app.olaunchercf.MainViewModel
 import app.olaunchercf.R
 import app.olaunchercf.data.AppModel
+import app.olaunchercf.data.Constants
 import app.olaunchercf.data.Constants.Action
 import app.olaunchercf.data.Constants.AppDrawerFlag
 import app.olaunchercf.data.Prefs
@@ -37,6 +44,15 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
     private lateinit var viewModel: MainViewModel
     private lateinit var deviceManager: DevicePolicyManager
     private lateinit var vibrator: Vibrator
+    private lateinit var mawaqit: MawaqitWidget
+    private lateinit var islamicCornerParams: FrameLayout.LayoutParams
+
+    private var timeReceiverRegistered = false
+    private val timeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            updateHijriDate()
+        }
+    }
 
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
@@ -65,6 +81,10 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
 
         deviceManager = context?.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         vibrator = context?.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        mawaqit = MawaqitWidget(requireContext())
+        islamicCornerParams = binding.islamicLayout.layoutParams as FrameLayout.LayoutParams
+        // the Arabic clock copies the clock, so it keeps its 12/24-hour format
+        binding.clock.doAfterTextChanged { binding.arabicClock.text = toArabicDigits(it ?: "") }
 
         initObservers()
 
@@ -78,7 +98,31 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
 
         binding.clock.textSize = prefs.textSize * 2.5f
         binding.date.textSize = prefs.textSize.toFloat()
+        // Arabic script looks smaller than Latin at the same size
+        binding.arabicClock.textSize = prefs.textSize * 2.5f
+        binding.hijriDate.textSize = prefs.textSize * 1.3f
+        binding.nextPrayer.textSize = prefs.textSize * 1.3f
 
+        updateHijriDate()
+        if (prefs.showHijriDate) {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_TIME_TICK)
+                addAction(Intent.ACTION_TIME_CHANGED)
+                addAction(Intent.ACTION_TIMEZONE_CHANGED)
+            }
+            requireContext().registerReceiver(timeReceiver, filter)
+            timeReceiverRegistered = true
+        }
+        startNextPrayer()
+    }
+
+    override fun onStop() {
+        if (timeReceiverRegistered) {
+            requireContext().unregisterReceiver(timeReceiver)
+            timeReceiverRegistered = false
+        }
+        mawaqit.stopListening()
+        super.onStop()
     }
 
     override fun onResume() {
@@ -141,6 +185,7 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
         with(viewModel) {
             clockAlignment.observe(viewLifecycleOwner) { gravity ->
                 binding.dateTimeLayout.gravity = gravity.value()
+                placeIslamicLayout(gravity)
             }
             homeAppsAlignment.observe(viewLifecycleOwner) { (gravity, onBottom) ->
                 val horizontalAlignment = if (onBottom) Gravity.BOTTOM else Gravity.CENTER_VERTICAL
@@ -159,6 +204,55 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
             showDate.observe(viewLifecycleOwner) {
                 binding.date.visibility = if (it) View.VISIBLE else View.GONE
             }
+        }
+    }
+
+    // mirrors the clock: top-right corner when the clock is on the left, top-left when it is
+    // on the right, under the date when it is centered. Left/right are absolute, like the clock's.
+    @SuppressLint("RtlHardcoded")
+    private fun placeIslamicLayout(gravity: Constants.Gravity) {
+        val layout = binding.islamicLayout
+        val corner = when (gravity) {
+            Constants.Gravity.Left -> Gravity.RIGHT
+            Constants.Gravity.Right -> Gravity.LEFT
+            Constants.Gravity.Center -> null
+        }
+        val parent: ViewGroup = if (corner != null) binding.mainLayout else binding.dateTimeLayout
+        if (layout.parent !== parent) {
+            (layout.parent as ViewGroup).removeView(layout)
+            if (corner != null) {
+                parent.addView(layout, parent.indexOfChild(binding.dateTimeLayout) + 1, islamicCornerParams)
+            } else {
+                parent.addView(layout, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            }
+        }
+        if (corner != null) {
+            islamicCornerParams.gravity = Gravity.TOP or corner
+            layout.layoutParams = islamicCornerParams
+        }
+        layout.gravity = corner ?: gravity.value()
+    }
+
+    private fun updateHijriDate() {
+        if (_binding == null) return
+        if (prefs.showHijriDate && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val text = hijriDateText(prefs.hijriDateAdjustment)
+            if (binding.hijriDate.text.toString() != text) binding.hijriDate.text = text
+            binding.hijriDate.visibility = View.VISIBLE
+            binding.arabicClock.visibility = if (prefs.showTime) View.VISIBLE else View.GONE
+        } else {
+            binding.hijriDate.visibility = View.GONE
+            binding.arabicClock.visibility = View.GONE
+        }
+    }
+
+    private fun startNextPrayer() {
+        binding.nextPrayer.visibility = View.GONE
+        if (!prefs.showNextPrayer) return
+        mawaqit.startListening(prefs.mawaqitWidgetId) { nextPrayer ->
+            val view = _binding?.nextPrayer ?: return@startListening
+            view.text = nextPrayer
+            view.visibility = if (nextPrayer == null) View.GONE else View.VISIBLE
         }
     }
 

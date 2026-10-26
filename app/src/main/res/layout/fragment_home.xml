@@ -47,6 +47,53 @@
             tools:text="Thu, 30 Dec" />
     </LinearLayout>
 
+    <!-- Arabic clock, Hijri date and next prayer, placed opposite the clock (see HomeFragment) -->
+    <LinearLayout
+        android:id="@+id/islamicLayout"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|right"
+        android:layout_marginStart="24dp"
+        android:layout_marginTop="56dp"
+        android:layout_marginEnd="24dp"
+        android:gravity="right"
+        android:orientation="vertical"
+        tools:ignore="RtlHardcoded">
+
+        <TextView
+            android:id="@+id/arabicClock"
+            style="@style/TextDefault"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-light"
+            android:textSize="@dimen/time_size"
+            android:visibility="gone"
+            tools:text="٠٩:٤٠"
+            tools:visibility="visible" />
+
+        <TextView
+            android:id="@+id/hijriDate"
+            style="@style/TextDefault"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="2dp"
+            android:textSize="@dimen/date_size"
+            android:visibility="gone"
+            tools:text="اثنين، ١٥ جمادى ١"
+            tools:visibility="visible" />
+
+        <TextView
+            android:id="@+id/nextPrayer"
+            style="@style/TextDefault"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="2dp"
+            android:textSize="@dimen/date_size"
+            android:visibility="gone"
+            tools:text="Asr 16:12"
+            tools:visibility="visible" />
+    </LinearLayout>
+
     <!-- Home apps-->
     <LinearLayout
         android:id="@+id/homeAppsLayout"
