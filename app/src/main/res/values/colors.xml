@@ -4,6 +4,9 @@
     <color name="colorPrimaryDark">@android:color/darker_gray</color>
     <color name="colorAccent">#FFEB3B</color>
 
+    <!-- Hijri date around the white days, see values-night for the dark theme -->
+    <color name="hijriWhiteDays">#B8860B</color>
+
     <!--White-->
     <color name="white">#FFFFFF</color>
     <color name="whiteTrans90">#E6FFFFFF</color>
