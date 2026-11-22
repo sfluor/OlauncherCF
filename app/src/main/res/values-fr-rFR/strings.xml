@@ -78,4 +78,15 @@
     <string name="backup">Backup</string>
     <string name="load_backup">Load Backup</string>
     <string name="store_backup">Store Backup</string>
+    <string name="show_today_events">Afficher les évènements d\'aujourd\'hui et de demain</string>
+    <string name="tomorrow">Demain</string>
+    <string name="calendars">Agendas</string>
+    <string name="calendars_all">Tous</string>
+    <string name="all_day">Journée</string>
+    <string name="no_title">(Sans titre)</string>
+    <plurals name="events_more">
+        <item quantity="one">+%d autre</item>
+        <item quantity="many">+%d autres</item>
+        <item quantity="other">+%d autres</item>
+    </plurals>
 </resources>

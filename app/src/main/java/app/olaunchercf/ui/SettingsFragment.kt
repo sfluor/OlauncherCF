@@ -50,6 +50,7 @@ import app.olaunchercf.databinding.FragmentSettingsBinding
 import app.olaunchercf.helper.*
 import app.olaunchercf.listener.DeviceAdmin
 import app.olaunchercf.ui.compose.SettingsComposable.SettingsArea
+import app.olaunchercf.ui.compose.SettingsComposable.SettingsChecklist
 import app.olaunchercf.ui.compose.SettingsComposable.SettingsGestureItem
 import app.olaunchercf.ui.compose.SettingsComposable.SettingsItem
 import app.olaunchercf.ui.compose.SettingsComposable.SettingsNumberItem
@@ -275,6 +276,26 @@ class SettingsFragment : Fragment() {
                             onChange = onChange,
                             state = showTodayEvents
                         ) { toggleShowTodayEvents() }
+                    },
+                    { open, onChange ->
+                        if (showTodayEvents.value) {
+                            // read again on opening, the permission may have come after the first look
+                            val calendars = remember(open.value) { queryCalendars(requireContext()) }
+                            val hidden = remember { mutableStateOf(prefs.hiddenCalendars) }
+                            val shown = calendars.count { it.id !in hidden.value }
+                            SettingsChecklist(
+                                title = stringResource(R.string.calendars),
+                                summary = if (shown == calendars.size) stringResource(R.string.calendars_all) else "$shown/${calendars.size}",
+                                choices = calendars.map { it.name },
+                                checked = calendars.map { it.id !in hidden.value },
+                                open = open,
+                                onChange = onChange,
+                            ) { i ->
+                                val id = calendars[i].id
+                                hidden.value = if (id in hidden.value) hidden.value - id else hidden.value + id
+                                prefs.hiddenCalendars = hidden.value
+                            }
+                        }
                     },
                     { _, onChange ->
                         SettingsToggle(

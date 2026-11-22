@@ -30,6 +30,7 @@ private const val HIJRI_DATE_ADJUSTMENT = "HIJRI_DATE_ADJUSTMENT"
 private const val SHOW_NEXT_PRAYER = "SHOW_NEXT_PRAYER"
 private const val MAWAQIT_WIDGET_ID = "MAWAQIT_WIDGET_ID"
 private const val SHOW_TODAY_EVENTS = "SHOW_TODAY_EVENTS"
+private const val HIDDEN_CALENDARS = "HIDDEN_CALENDARS"
 private const val HOME_LOCKED = "HOME_LOCKED"
 private const val SHOW_TIME = "SHOW_TIME"
 private const val SWIPE_DOWN_ACTION = "SWIPE_DOWN_ACTION"
@@ -197,6 +198,11 @@ class Prefs(val context: Context) {
     var showTodayEvents: Boolean
         get() = prefs.getBoolean(SHOW_TODAY_EVENTS, false)
         set(value) = prefs.edit().putBoolean(SHOW_TODAY_EVENTS, value).apply()
+
+    // ids of the calendars whose events stay off the home screen, so new calendars show by default
+    var hiddenCalendars: Set<Long>
+        get() = prefs.getStringSet(HIDDEN_CALENDARS, emptySet()).orEmpty().mapNotNull { it.toLongOrNull() }.toSet()
+        set(value) = prefs.edit().putStringSet(HIDDEN_CALENDARS, value.map { it.toString() }.toSet()).apply()
 
     var homeLocked: Boolean
         get() = prefs.getBoolean(HOME_LOCKED, false)

@@ -169,6 +169,43 @@ object SettingsComposable {
         }
     }
 
+    // a title row, and while open a row per choice switched on and off one by one
+    @Composable
+    fun SettingsChecklist(
+        title: String,
+        summary: String,
+        choices: List<String>,
+        checked: List<Boolean>,
+        open: MutableState<Boolean>,
+        onChange: (Boolean) -> Unit,
+        fontSize: TextUnit = TextUnit.Unspecified,
+        onToggle: (Int) -> Unit,
+    ) {
+        SettingsRow(
+            title = title,
+            onClick = { onChange(!open.value) },
+            fontSize = fontSize,
+            buttonText = summary,
+        )
+        if (open.value) {
+            Column(
+                modifier = Modifier
+                    .background(SettingsTheme.color.selector, SettingsTheme.shapes.settings)
+                    .padding(horizontal = 12.dp)
+                    .fillMaxWidth()
+            ) {
+                choices.forEachIndexed { i, choice ->
+                    SettingsRow(
+                        title = choice,
+                        onClick = { onToggle(i) },
+                        fontSize = fontSize,
+                        buttonText = stringResource(if (checked[i]) R.string.on else R.string.off),
+                    )
+                }
+            }
+        }
+    }
+
     @Composable
     fun SettingsGestureItem(
         title: String,

@@ -56,10 +56,16 @@
     <string name="show_hijri_date">Show Arabic time and Hijri date</string>
     <string name="hijri_date_adjustment">Hijri date adjustment (days)</string>
     <string name="show_next_prayer">Show next prayer (Mawaqit)</string>
-    <string name="show_today_events">Show today\'s events</string>
+    <string name="show_today_events">Show today\'s and tomorrow\'s events</string>
+    <string name="tomorrow">Tomorrow</string>
+    <string name="calendars">Calendars</string>
+    <string name="calendars_all">All</string>
     <string name="all_day">All day</string>
     <string name="no_title">(No title)</string>
-    <string name="events_more">+%d more</string>
+    <plurals name="events_more">
+        <item quantity="one">+%d more</item>
+        <item quantity="other">+%d more</item>
+    </plurals>
     <string name="lock_home_apps">Lock Apps</string>
     <string name="extend_home_apps_area">Extend clickable area on home apps</string>
     <string name="appearance">Appearance</string>

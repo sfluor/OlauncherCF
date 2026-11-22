@@ -20,8 +20,10 @@ import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.TableLayout
 import android.widget.TableRow
 import android.widget.TextView
 import androidx.core.content.ContextCompat
@@ -50,7 +52,8 @@ import kotlinx.coroutines.withContext
 import java.util.Date
 
 
-private const val MAX_EVENTS = 5
+private const val MAX_TODAY_EVENTS = 4
+private const val MAX_TOMORROW_EVENTS = 3
 
 class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener {
 
@@ -66,16 +69,18 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
     private val timeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             updateHijriDate()
-            updateTodayEvents()
+            updateEvents()
         }
     }
 
     private var calendarObserverRegistered = false
     private val calendarObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) {
-            updateTodayEvents()
+            updateEvents()
         }
     }
+
+    private val fitEventsListener = ViewTreeObserver.OnGlobalLayoutListener { fitEventsBesideApps() }
 
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
@@ -109,6 +114,7 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
         hijriDateColors = binding.hijriDate.textColors
         // the Arabic clock copies the clock, so it keeps its 12/24-hour format
         binding.clock.doAfterTextChanged { binding.arabicClock.text = toArabicDigits(it ?: "") }
+        binding.root.viewTreeObserver.addOnGlobalLayoutListener(fitEventsListener)
 
         initObservers()
 
@@ -153,6 +159,11 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
         super.onStop()
     }
 
+    override fun onDestroyView() {
+        binding.root.viewTreeObserver.removeOnGlobalLayoutListener(fitEventsListener)
+        super.onDestroyView()
+    }
+
     override fun onResume() {
         super.onResume()
 
@@ -161,7 +172,7 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
             requireContext().contentResolver.registerContentObserver(CalendarContract.CONTENT_URI, true, calendarObserver)
             calendarObserverRegistered = true
         }
-        updateTodayEvents()
+        updateEvents()
 
         // only show "set as default"-button if tips are GONE
         if (binding.firstRunTips.visibility == View.GONE) {
@@ -229,7 +240,7 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
                 binding.homeAppsLayout.children.forEach { view ->
                     (view as TextView).gravity = gravity.value()
                 }
-                placeEventsLayout(gravity, onBottom)
+                placeEventsLayout(gravity)
             }
             homeAppsCount.observe(viewLifecycleOwner) {
                 updateAppCount(it)
@@ -287,16 +298,64 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
         }
     }
 
-    // bottom-right corner, or bottom-left when the home apps are at the bottom right
+    // bottom-right corner, or bottom-left when the home apps are on the right
     @SuppressLint("RtlHardcoded")
-    private fun placeEventsLayout(appsGravity: Constants.Gravity, appsOnBottom: Boolean) {
+    private fun placeEventsLayout(appsGravity: Constants.Gravity) {
         val params = binding.eventsLayout.layoutParams as FrameLayout.LayoutParams
-        val side = if (appsOnBottom && appsGravity == Constants.Gravity.Right) Gravity.LEFT else Gravity.RIGHT
+        val side = if (appsGravity == Constants.Gravity.Right) Gravity.LEFT else Gravity.RIGHT
         params.gravity = Gravity.BOTTOM or side
         binding.eventsLayout.layoutParams = params
     }
 
-    private fun updateTodayEvents() {
+    // Keeps the events clear of the home app labels beside them: the margin on the apps' side grows
+    // past the widest of those labels, and the title column shrinks to fit. The events keep at least
+    // a third of the screen.
+    @SuppressLint("RtlHardcoded")
+    private fun fitEventsBesideApps() {
+        val binding = _binding ?: return
+        val events = binding.eventsLayout
+        if (events.visibility != View.VISIBLE) return
+        val apps = binding.homeAppsLayout
+        val labels = apps.children
+            .filterIsInstance<TextView>()
+            .filter { it.visibility == View.VISIBLE }
+            .filter { apps.top + it.bottom > events.top && apps.top + it.top < events.bottom }
+            .map { labelEdges(it, apps.left) }
+            .toList()
+
+        val width = binding.root.width
+        val gap = dp2px(resources, 24)
+        val maxMargin = width - gap - width / 3
+        val params = events.layoutParams as FrameLayout.LayoutParams
+        val onLeft = params.gravity and Gravity.HORIZONTAL_GRAVITY_MASK == Gravity.LEFT
+        val appsMargin = if (labels.isEmpty()) gap else {
+            val appsEdge = if (onLeft) width - labels.minOf { it.first } else labels.maxOf { it.second }
+            (appsEdge.toInt() + gap).coerceIn(gap, maxOf(gap, maxMargin))
+        }
+        val left = if (onLeft) gap else appsMargin
+        val right = if (onLeft) appsMargin else gap
+        if (params.leftMargin != left || params.rightMargin != right) {
+            params.leftMargin = left
+            params.rightMargin = right
+            events.layoutParams = params
+        }
+    }
+
+    // left and right edges of the label's text, or of its hint when it has no app yet
+    @SuppressLint("RtlHardcoded")
+    private fun labelEdges(label: TextView, offset: Int): Pair<Float, Float> {
+        val shown = label.text.ifEmpty { label.hint ?: "" }
+        val space = (label.width - label.totalPaddingLeft - label.totalPaddingRight).toFloat()
+        val textWidth = label.paint.measureText(shown, 0, shown.length).coerceAtMost(space)
+        val left = offset + label.left + label.totalPaddingLeft + when (Gravity.getAbsoluteGravity(label.gravity, label.layoutDirection) and Gravity.HORIZONTAL_GRAVITY_MASK) {
+            Gravity.RIGHT -> space - textWidth
+            Gravity.CENTER_HORIZONTAL -> (space - textWidth) / 2
+            else -> 0f
+        }
+        return left to left + textWidth
+    }
+
+    private fun updateEvents() {
         if (_binding == null) return
         val context = requireContext().applicationContext
         if (!prefs.showTodayEvents || !hasCalendarPermission(context)) {
@@ -304,37 +363,78 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
             return
         }
         val timeFormat = DateFormat.getTimeFormat(context)
+        val formatTime = { time: Long -> timeFormat.format(Date(time)) }
+        val hidden = prefs.hiddenCalendars
         viewLifecycleOwner.lifecycleScope.launch {
             val now = System.currentTimeMillis()
-            val events = withContext(Dispatchers.IO) { queryTodayEvents(context, now) }
-            showTodayEvents(todayEvents(events, startOfDay(now), now, MAX_EVENTS) { timeFormat.format(Date(it)) }, now)
+            val today = startOfDay(now)
+            val tomorrow = startOfDay(now, plusDays = 1)
+            val (todayEvents, tomorrowEvents) = withContext(Dispatchers.IO) {
+                queryDayEvents(context, today, hidden) to eventsStartingOn(tomorrow, queryDayEvents(context, tomorrow, hidden))
+            }
+            showEvents(
+                dayEvents(todayEvents, today, now, MAX_TODAY_EVENTS, formatTime), today,
+                dayEvents(tomorrowEvents, tomorrow, now, MAX_TOMORROW_EVENTS, formatTime), tomorrow,
+            )
         }
     }
 
-    private fun showTodayEvents(today: TodayEvents, now: Long) {
+    // today's events, then tomorrow's under a separator
+    private fun showEvents(today: DayEvents, startOfToday: Long, tomorrow: DayEvents, startOfTomorrow: Long) {
         val table = _binding?.eventsLayout ?: return
         table.removeAllViews()
-        if (today.rows.isEmpty()) {
-            table.visibility = View.GONE
-            return
+        addDayEvents(table, today, startOfToday)
+        if (tomorrow.rows.isNotEmpty()) {
+            table.addView(daySeparator(getString(R.string.tomorrow), startOfTomorrow))
+            addDayEvents(table, tomorrow, startOfTomorrow)
         }
-        for (row in today.rows) {
+        table.visibility = if (table.childCount > 0) View.VISIBLE else View.GONE
+    }
+
+    private fun addDayEvents(table: TableLayout, day: DayEvents, startOfDay: Long) {
+        for (row in day.rows) {
             val tableRow = eventRow(row.time ?: getString(R.string.all_day), row.title.ifBlank { getString(R.string.no_title) })
             tableRow.alpha = if (row.finished) 0.5f else 1f
             tableRow.setOnClickListener { openCalendarEvent(it.context, row.event) }
             table.addView(tableRow)
         }
-        if (today.more > 0) {
-            val tableRow = eventRow("", getString(R.string.events_more, today.more))
-            tableRow.setOnClickListener { openCalendarDay(it.context, now) }
+        if (day.more > 0) {
+            val tableRow = eventRow("", resources.getQuantityString(R.plurals.events_more, day.more, day.more))
+            tableRow.setOnClickListener { openCalendarDay(it.context, startOfDay) }
             table.addView(tableRow)
         }
-        table.visibility = View.VISIBLE
+    }
+
+    // a faint line across the list, ending with the day's name
+    private fun daySeparator(label: String, startOfDay: Long): View {
+        val context = requireContext()
+        val labelView = TextView(context, null, 0, R.style.TextDefault).apply {
+            textSize = prefs.textSize * 0.7f
+            text = label
+            setPaddingRelative(dp2px(resources, 8), 0, 0, 0)
+        }
+        // asks for no width, unlike a plain View, so the line only fills the width of the rows
+        val line = object : View(context) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                setMeasuredDimension(resolveSize(0, widthMeasureSpec), resolveSize(0, heightMeasureSpec))
+            }
+        }.apply {
+            setBackgroundColor(labelView.currentTextColor)
+            alpha = 0.5f
+        }
+        return LinearLayout(context).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            alpha = 0.7f
+            setPadding(0, dp2px(resources, 10), 0, dp2px(resources, 2))
+            addView(line, LinearLayout.LayoutParams(0, maxOf(1, dp2px(resources, 1)), 1f))
+            addView(labelView)
+            setOnClickListener { openCalendarDay(it.context, startOfDay) }
+        }
     }
 
     private fun eventRow(time: String, title: String): TableRow {
         val context = requireContext()
-        val size = prefs.textSize.toFloat()
+        val size = prefs.textSize * 0.85f
         val timeView = TextView(context, null, 0, R.style.TextDefault).apply {
             textSize = size
             text = time
@@ -345,7 +445,7 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
             maxWidth = resources.displayMetrics.widthPixels / 2
-            setPaddingRelative(dp2px(resources, 12), 0, 0, 0)
+            setPaddingRelative(dp2px(resources, 10), 0, 0, 0)
         }
         return TableRow(context).apply {
             addView(timeView)
